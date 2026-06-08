@@ -1,9 +1,10 @@
-
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import Button from './Button';
+import { LogoIcon } from '../icons/LogoIcon'; // Asegúrate de que esta ruta sea correcta
 
+// Auxiliary component for navigation links (defined outside to avoid unnecessary re-renders)
 const NavLinkItem: React.FC<{ to: string; children: React.ReactNode }> = ({ to, children }) => (
   <NavLink
     to={to}
@@ -24,11 +25,16 @@ const Header: React.FC = () => {
     <header className="bg-slate-800 shadow-lg">
       <nav className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
+          
+          {/* Logo and Main Navigation */}
           <div className="flex items-center">
-            <Link to="/" className="flex-shrink-0 text-white font-bold text-xl flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 text-sky-400"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6Z"/><path d="M8 6V4"/><path d="M16 6V4"/><path d="M12 11h.01"/><path d="M12 16h.01"/><path d="M8 11h.01"/><path d="M8 16h.01"/><path d="M16 11h.01"/><path d="M16 16h.01"/></svg>
+            <Link to="/" className="flex-shrink-0 text-white font-bold text-xl flex items-center group">
+              {/* Logo icon extracted to its own component */}
+              <LogoIcon className="mr-2 text-sky-400 group-hover:text-sky-300 transition-colors" />
               SmartTicket-AI
             </Link>
+            
+            {/* Desktop Menu */}
             <div className="hidden md:block">
               <div className="ml-10 flex items-baseline space-x-4">
                 {isAuthenticated && (
@@ -40,10 +46,12 @@ const Header: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* User Area / Auth */}
           <div className="flex items-center">
             {isAuthenticated ? (
               <div className="flex items-center space-x-4">
-                <span className="text-slate-300 text-sm">Welcome, {user?.name}</span>
+                <span className="text-slate-300 text-sm hidden sm:block">Welcome, {user?.name}</span>
                 <Button onClick={logout} variant="secondary" size="sm">
                   Logout
                 </Button>

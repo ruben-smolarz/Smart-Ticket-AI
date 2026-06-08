@@ -1,8 +1,5 @@
-
-import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { User, Role } from '../types';
-import { api } from '../services/api';
-import Spinner from '../components/common/Spinner';
 
 interface AuthContextType {
   user: User | null;
@@ -21,42 +18,20 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  // Initialize state by reading directly from localStorage to prevent flickering
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('authToken'));
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const fetchUserProfile = useCallback(async () => {
-    if (localStorage.getItem('authToken')) {
-      try {
-        // This assumes you have an endpoint to get the current user's profile
-        // If not, you might need to decode the JWT or store user data in localStorage
-        // For simplicity, we'll try to fetch a "me" or "profile" object on load
-        // A placeholder user object is created if profile endpoint doesn't exist.
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-           setUser(JSON.parse(storedUser));
-        } else {
-            // A real app would have a dedicated /api/auth/profile endpoint.
-            // We simulate this by re-storing user info on login.
-            logout();
-        }
-      } catch (error) {
-        console.error('Failed to fetch user profile, logging out.', error);
-        logout();
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    setIsLoading(true);
-    setToken(localStorage.getItem('authToken'));
-    fetchUserProfile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Function to clean session (defined beforehand for use in useEffect)
+  const logout = () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+    // NOTE: We do not do window.location here. 
+    // ProtectedRoute will detect that isAuthenticated is false and redirect on its own.
+  };
 
   const login = (newToken: string, userData: User) => {
     localStorage.setItem('authToken', newToken);
@@ -65,18 +40,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(userData);
   };
 
-  const logout = () => {
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
-    window.location.hash = '/login';
-  };
+  useEffect(() => {
+    const initializeAuth = () => {
+      const storedToken = localStorage.getItem('authToken');
+      const storedUser = localStorage.getItem('user');
+
+      if (storedToken && storedUser) {
+        try {
+          // CRITICAL IMPROVEMENT: try-catch to prevent crash if JSON is corrupt
+          const parsedUser: User = JSON.parse(storedUser);
+          setUser(parsedUser);
+          setToken(storedToken);
+        } catch (error) {
+          console.error('Error parsing user data form local storage:', error);
+          // If there is an error in saved data, clean everything for safety
+          logout();
+        }
+      } else {
+        // If one of the two is missing, clean to prevent inconsistent states
+        logout();
+      }
+      
+      setIsLoading(false);
+    };
+
+    initializeAuth();
+  }, []);
 
   const value = {
     user,
     token,
-    isLoading: isLoading,
+    isLoading,
     login,
     logout,
     isAuthenticated: !!token,

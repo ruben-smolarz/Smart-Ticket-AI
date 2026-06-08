@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../services/api';
 import { User, Role } from '../../types';
@@ -28,8 +27,10 @@ const AdminDashboardPage: React.FC = () => {
       setIsLoading(true);
       const fetchedUsers = await api.getAllUsers();
       setUsers(fetchedUsers);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch users.');
+    } catch (err) {
+      // TS CORRECTION: Safe error handling
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch users.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

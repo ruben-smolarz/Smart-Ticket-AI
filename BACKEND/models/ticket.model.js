@@ -3,7 +3,8 @@ import mongoose from "mongoose";
 const ticketSchema = new mongoose.Schema({
   title: String,
   description: String,
-  status: { type: String, default: "TODO" },
+  // Use uppercase if your frontend uses constants like IN_PROGRESS
+  status: { type: String, default: "OPEN" }, 
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,
@@ -13,7 +14,7 @@ const ticketSchema = new mongoose.Schema({
   priority: String,
   deadline: Date,
   helpfulNotes: String,
-  relatedSkills: [String],
+  relatedSkills: [String], // This is correct
   moderatorMessage: {
     type: String,
     default: "",

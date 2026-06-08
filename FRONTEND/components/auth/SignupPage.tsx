@@ -32,9 +32,16 @@ const SignupPage: React.FC = () => {
     try {
       const { token, user } = await api.signup({ name, email, password });
       login(token, user);
-      navigate('/');
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign up. Please try again.');
+      
+      // UX IMPROVEMENT: Use replace: true to clear the form history
+      navigate('/', { replace: true });
+      
+    } catch (err) {
+      // TS CORRECTION: Safe error handling
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : 'Failed to sign up. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
@@ -18,8 +17,10 @@ const TicketsListPage: React.FC = () => {
         setIsLoading(true);
         const fetchedTickets = await api.getTickets();
         setTickets(fetchedTickets);
-      } catch (err: any) {
-        setError(err.message || 'Failed to fetch tickets.');
+      } catch (err) {
+        // TS CORRECTION: Safe error handling
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch tickets.';
+        setError(errorMessage);
       } finally {
         setIsLoading(false);
       }
@@ -37,7 +38,7 @@ const TicketsListPage: React.FC = () => {
   }
 
   if (error) {
-    return <div className="text-center text-red-400">{error}</div>;
+    return <div className="text-center text-red-400 mt-8">{error}</div>;
   }
 
   return (
@@ -48,9 +49,13 @@ const TicketsListPage: React.FC = () => {
           <Button>Create New Ticket</Button>
         </Link>
       </div>
+
       {tickets.length === 0 ? (
-        <div className="text-center py-10 bg-slate-800 rounded-lg">
-          <p className="text-slate-400">You haven't created any tickets yet.</p>
+        <div className="text-center py-16 bg-slate-800 rounded-lg border border-slate-700 dashed">
+          <p className="text-slate-400 mb-4 text-lg">You haven't created any tickets yet.</p>
+          <Link to="/tickets/new">
+             <Button variant="secondary">Create your first ticket</Button>
+          </Link>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

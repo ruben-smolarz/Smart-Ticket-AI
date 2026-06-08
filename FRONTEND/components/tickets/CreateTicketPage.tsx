@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
@@ -18,9 +17,14 @@ const CreateTicketPage: React.FC = () => {
     setError(null);
     try {
       await api.createTicket({ title, description });
-      navigate('/');
-    } catch (err: any) {
-      setError(err.message || 'Failed to create ticket. Please try again.');
+      // Successful redirect (optional: replace to not go back in history)
+      navigate('/', { replace: true });
+    } catch (err) {
+      // TS CORRECTION: Safe error handling
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : 'Failed to create ticket. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -55,7 +59,7 @@ const CreateTicketPage: React.FC = () => {
               required
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 sm:text-sm"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 sm:text-sm text-white" 
               placeholder="Please provide as much detail as possible..."
             />
           </div>

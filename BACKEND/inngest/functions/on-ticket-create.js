@@ -6,83 +6,103 @@ import { sendMail } from "../../utils/mailer.js";
 import analyzeTicket from "../../utils/ai.js";
 
 export const onTicketCreated = inngest.createFunction(
-  {id: "on-ticket-create", retries: 2},
-  { event: "ticket/created" },
+  { id: "on-ticket-create", retries: 2, triggers: [{ event: "ticket/created" }] },
   async ({ event, step }) => {
-    try {
-        const { ticketId} = event.data;
-        const ticket = await step.run("fetch-ticket", async () => {
-            const ticketObject = await Ticket.findById(ticketId);
-            if (!ticketObject) {
-                throw new NonRetriableError("Ticket not found");
-            }
-            return ticketObject;
+    
+    const { ticketId } = event.data;
+
+    // 1. Fetch the Ticket
+    const ticket = await step.run("fetch-ticket", async () => {
+      const ticketObject = await Ticket.findById(ticketId);
+      if (!ticketObject) {
+        throw new NonRetriableError("Ticket not found");
+      }
+      return ticketObject.toObject();
+    });
+
+    // 2. Update initial status
+    await step.run("update-ticket-status", async () => {
+      await Ticket.findByIdAndUpdate(ticketId, { status: "IN_PROGRESS" });
+    });
+
+    // 3. Analyze with AI
+    // Run the AI analysis function
+    const aiResponse = await step.run("analyze-ticket-ai", async () => {
+      return await analyzeTicket(ticket);
+    });
+
+    // 4. Save AI results
+    const updatedTicketInfo = await step.run("save-ai-results", async () => {
+      let priority = "Medium";
+      
+      // Normalize priority
+      if (aiResponse && aiResponse.priority) {
+         const p = aiResponse.priority.toLowerCase();
+         if (p === 'low') priority = "Low";
+         else if (p === 'high') priority = "High";
+         else if (p === 'urgent') priority = "Urgent";
+      }
+
+      // Ensure it is an array
+      const skillsToSave = aiResponse.relatedSkills || [];
+
+      await Ticket.findByIdAndUpdate(ticketId, {
+        priority: priority,
+        helpfulNotes: aiResponse.helpfulNotes || "No notes provided.",
+        relatedSkills: skillsToSave, // Save the correct skills array here
+        // aiNotes: "" // If not used in the model, better to remove
+      });
+
+      return { relatedSkills: skillsToSave };
+    });
+
+    // 5. Assign Moderator based on Skills
+    const moderator = await step.run("assign-moderator", async () => {
+      const skills = updatedTicketInfo.relatedSkills;
+
+      if (skills.length === 0) return null;
+
+      // Find user with matching skills (flexible JS substring match)
+      let user = null;
+      if (skills && skills.length > 0) {
+        const moderators = await User.find({ role: "moderator" });
+        user = moderators.find(mod => {
+          return mod.skills.some(modSkill =>
+            skills.some(ticketSkill =>
+              ticketSkill.toLowerCase().includes(modSkill.toLowerCase()) ||
+              modSkill.toLowerCase().includes(ticketSkill.toLowerCase())
+            )
+          );
         });
+      }
 
-       await step.run("update-ticket-status", async () => {
-           await Ticket.findOneAndUpdate(
-               { _id: ticketId },   
-               { status: "TODO" },
-               { new: true }
-           );
-       });
+      // If no expert found, fallback to any admin
+      if (!user) {
+        user = await User.findOne({ role: "admin" });
+      }
 
-       const aiResponse = await analyzeTicket(ticket);
+      if (user) {
+        await Ticket.findByIdAndUpdate(ticketId, {
+          assignedTo: user._id,
+        });
+      }
 
-       const relatedSkills = await step.run("ai-processing", async () => {
-            let skills = []
-            if (aiResponse) {
-               await Ticket.findByIdAndUpdate(ticketId, {
-                   priority:["low", "medium", "high"].includes(aiResponse.priority) ? aiResponse.priority : "medium",
-                   helpfulNotes: aiResponse.helpfulNotes ? aiResponse.helpfulNotes : [],
-                   status: "IN_PROGRESS",
-                   relatedSkills: aiResponse.relatedSkills ? aiResponse.relatedSkills : [],
-               })
+      return user ? user.toObject() : null;
+    });
 
-               skills = aiResponse.relatedSkills || [];
-           }
+    // 6. Send notification
+    if (moderator) {
+      await step.run("send-notification", async () => {
+        const finalTicket = await Ticket.findById(ticketId);
+        
+        const subject = `New Ticket Assigned: ${finalTicket.title}`;
+        const message = `Hello ${moderator.name},\n\nA new ticket has been assigned to you.\n\nTitle: ${finalTicket.title}\nPriority: ${finalTicket.priority}\nSkills: ${finalTicket.relatedSkills.join(", ")}\n\nPlease check the dashboard.\n\nBest regards,\nSmartTicket AI`;
 
-           return skills
-       });
-
-       const moderator = await step.run("assign-moderator", async () => {
-           let user = await  User.findOne({
-            role: "moderator",
-            skills: {
-                $elemMatch: {
-                    $regex: relatedSkills.join("|"),
-                    $options: "i",
-                },
-            },
-           });
-
-           if(!user){
-            user = await User.findOne({ role: "admin" });
-           }
-
-           await Ticket.findByIdAndUpdate(ticketId, {
-               assignedTo: user?._id || null,
-           });
-
-           return user;
-       });
-
-       await step.run("send-notification", async () => {
-           if (moderator) {
-               const finalTicket = await Ticket.findById(ticket._id);
-               
-               const subject = `New Ticket Assigned: ${finalTicket.title}`;
-               const message = `Hello ${moderator.name},\n\nA new ticket has been assigned to you:\n\nTitle: ${finalTicket.title}\nDescription: ${finalTicket.description}\nPriority: ${finalTicket.priority}\n\nPlease check the ticket and take necessary actions.\n\nBest regards,\nTicketing System Team`;
-
-               await sendMail(moderator.email, subject, message);
-           }
-       });
-
-       return {success : true}
-       
-    } catch (error) {
-      console.error(`❌ Error creating ticket: ${error.message}`);
-      return { success: false };
+        await sendMail(moderator.email, subject, message);
+        console.log(`📧 Notification sent to: ${moderator.email}`);
+      });
     }
+
+    return { success: true, processedSkills: updatedTicketInfo.relatedSkills };
   }
 );

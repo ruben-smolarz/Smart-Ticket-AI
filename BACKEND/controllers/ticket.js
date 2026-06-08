@@ -13,12 +13,15 @@ export const createTicket = async (req, res) => {
     const newTicket = await Ticket.create({
       title,
       description,
-      priority: priority || "low",
+      priority: priority || "Low", // Ensure consistency (Capitalized)
       deadline,
       relatedSkills: relatedSkills || [],
       assignedTo: assignedTo || null,
       createdBy: req.user._id.toString(),
     });
+
+    // Populate to return the full object to the frontend immediately
+    await newTicket.populate('assignedTo', 'name email');
 
     await inngest.send({
       name: "ticket/created",
@@ -43,19 +46,22 @@ export const getTickets = async (req, res) => {
     const user = req.user;
     let tickets = [];
 
+    // Define which fields of 'assignedTo' we always want
+    const populateOptions = { path: 'assignedTo', select: 'name email _id' };
+
     if (user.role === "admin") {
       tickets = await Ticket.find({})
-        .populate("assignedTo", ["name", "email", "_id"])
+        .populate(populateOptions)
         .sort({ createdAt: -1 });
     } else if (user.role === "moderator") {
       tickets = await Ticket.find({
         $or: [{ assignedTo: user._id }, { createdBy: user._id }],
       })
-        .populate("assignedTo", ["name", "email", "_id"])
+        .populate(populateOptions)
         .sort({ createdAt: -1 });
     } else {
       tickets = await Ticket.find({ createdBy: user._id })
-        .populate("assignedTo", ["name", "email", "_id"])
+        .populate(populateOptions)
         .sort({ createdAt: -1 });
     }
 
@@ -72,27 +78,18 @@ export const getTicket = async (req, res) => {
     const user = req.user;
     let ticket;
 
-    const selectFields = "title description status createdAt priority relatedSkills assignedTo aiNotes helpfulNotes moderatorMessage";
+    // Include 'requiredSkills' if your model uses it, or 'relatedSkills'
+    const selectFields = "title description status createdAt priority relatedSkills requiredSkills assignedTo aiNotes helpfulNotes moderatorMessage";
 
-    if (user.role === "admin") {
-      ticket = await Ticket.findById(req.params.id)
+    const query = user.role === "admin" 
+      ? { _id: req.params.id }
+      : user.role === "moderator"
+        ? { _id: req.params.id, $or: [{ assignedTo: user._id }, { createdBy: user._id }] }
+        : { _id: req.params.id, createdBy: user._id };
+
+    ticket = await Ticket.findOne(query)
         .select(selectFields)
         .populate("assignedTo", ["name", "email", "_id"]);
-    } else if (user.role === "moderator") {
-      ticket = await Ticket.findOne({
-        _id: req.params.id,
-        $or: [{ assignedTo: user._id }, { createdBy: user._id }],
-      })
-        .select(selectFields)
-        .populate("assignedTo", ["name", "email", "_id"]);
-    } else {
-      ticket = await Ticket.findOne({
-        _id: req.params.id,
-        createdBy: user._id,
-      })
-        .select(selectFields)
-        .populate("assignedTo", ["name", "email", "_id"]);
-    }
 
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found or access denied" });
@@ -110,10 +107,11 @@ export const getTicket = async (req, res) => {
 export const updateTicket = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, moderatorMessage, assignedTo } = req.body;
+    const { title, description, moderatorMessage, assignedTo, priority } = req.body;
 
-    if (!title || !description) {
-      return res.status(400).json({ message: "Title and description are required" });
+    // Basic validation
+    if (!title && !description && assignedTo === undefined && !priority) {
+       return res.status(400).json({ message: "No fields to update provided" });
     }
 
     const ticket = await Ticket.findById(id);
@@ -125,8 +123,9 @@ export const updateTicket = async (req, res) => {
       return res.status(403).json({ message: "Only admins can update ticket details" });
     }
 
-    ticket.title = title;
-    ticket.description = description;
+    if (title) ticket.title = title;
+    if (description) ticket.description = description;
+    if (priority) ticket.priority = priority;
 
     if (moderatorMessage !== undefined) {
       ticket.moderatorMessage = moderatorMessage;
@@ -137,6 +136,8 @@ export const updateTicket = async (req, res) => {
     }
 
     await ticket.save();
+    // Important: Populate before returning so the frontend updates the user name
+    await ticket.populate("assignedTo", "name email _id");
 
     return res.status(200).json({ message: "Ticket updated successfully", ticket });
   } catch (error) {
@@ -146,15 +147,18 @@ export const updateTicket = async (req, res) => {
 };
 
 
-// Update Ticket Status — Admin, Moderator, Assigned User can update status & moderatorMessage
+// Update Ticket Status
 export const updateTicketStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, moderatorMessage } = req.body;
+    let { status, moderatorMessage } = req.body;
 
     if (!status) {
       return res.status(400).json({ message: "Status is required" });
     }
+
+    // Normalization: Ensure uppercase
+    status = status.toUpperCase();
 
     const allowedStatuses = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
     if (!allowedStatuses.includes(status)) {
@@ -181,6 +185,8 @@ export const updateTicketStatus = async (req, res) => {
     }
 
     await ticket.save();
+    // Populate to maintain consistency in the UI
+    await ticket.populate("assignedTo", "name email _id");
 
     return res.status(200).json({ message: "Ticket status updated", ticket });
   } catch (error) {

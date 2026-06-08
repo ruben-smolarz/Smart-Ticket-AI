@@ -30,8 +30,10 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({ user, onClose
 
       onUpdate(updatedUser);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to update user.');
+    } catch (err) {
+      // TS CORRECTION: Safe error handling
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update user.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

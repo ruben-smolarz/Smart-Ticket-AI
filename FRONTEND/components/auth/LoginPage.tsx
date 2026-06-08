@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../services/api';
 import Button from '../common/Button';
@@ -12,18 +11,32 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
+  
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // 1. Retrieve the previous route (or go to home by default)
+  const from = location.state?.from?.pathname || '/';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+    
     try {
       const { token, user } = await api.login({ email, password });
       login(token, user);
-      navigate('/');
-    } catch (err: any) {
-      setError(err.message || 'Failed to login. Please check your credentials.');
+      
+      // 2. UX CORRECTION: Navigate to the 'from' route using replace
+      // so the user does not return to the login screen on clicking "Back".
+      navigate(from, { replace: true });
+
+    } catch (err) {
+      // 3. TS CORRECTION: Safer error handling without 'any'
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : 'Failed to login. Please check your credentials.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

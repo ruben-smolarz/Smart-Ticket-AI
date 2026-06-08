@@ -1,10 +1,10 @@
-import bcrypt from "bcrypt";
+import bcryptjs from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
 import { inngest } from "../inngest/client.js";
 
 export const signUp = async (req, res) => {
-  const {name, email, password, skills = []} = req.body;
+  const {name, email, password, skills = [], role} = req.body;
 
   try {
      if (!name || !email || !password) {
@@ -16,19 +16,20 @@ export const signUp = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcryptjs.hash(password, 10);
 
     const user = await User.create({
       name,
       email : email.toLowerCase(),
       password: hashedPassword,
       skills,
+      role: role || "user"
     });
 
     // Fire inngest event
     await inngest.send({
         name: "user/signup",
-        date:{
+        data:{
             email: email.toLowerCase(),
         }
     })
@@ -60,7 +61,7 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    const isMatch = await bcrypt.compare(password, existingUser.password);
+    const isMatch = await bcryptjs.compare(password, existingUser.password);
 
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -81,10 +82,14 @@ export const login = async (req, res) => {
 
 export const logout = async (req, res) => {
     try {
-        const token = req.headers.authorization.split(" ")[1];
+        const authHeader = req.headers.authorization;
+        if (!authHeader) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        const token = authHeader.split(" ")[1];
 
         if (!token) {
-            return res.status(401).json({error : "Unauthorized"});
+            return res.status(401).json({ error: "Unauthorized" });
         }
 
         jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {

@@ -19,8 +19,13 @@ export const authenticate = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
+    // UX improvement: Specific handling for expired token
+    if (error.name === 'TokenExpiredError') {
+        console.log("🔒 Token expired, access denied."); // Cleaner log
+        return res.status(403).json({ message: "Token expired" });
+    }
+    
     console.error("Token verification error:", error);
     return res.status(403).json({ message: "Invalid token" });
   }
 };
-

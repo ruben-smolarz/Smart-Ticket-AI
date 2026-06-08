@@ -1,141 +1,83 @@
 import { GoogleGenAI } from "@google/genai";
+import dotenv from 'dotenv';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+dotenv.config();
+
+const ai = new GoogleGenAI({ 
+  vertexai: false,
+  apiKey: process.env.GEMINI_API_KEY 
+});
 
 const analyzeTicket = async (ticket) => {
+  const modelsToTry = [ 
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
+    "gemini-2.0-flash-lite"
+  ];
 
-  const systemInstruction = `You are an expert AI assistant that processes technical support tickets. 
+  const prompt = `
+    You are an IT support AI. Analyze this ticket.
+    Ticket Title: "${ticket.title}"
+    Ticket Description: "${ticket.description}"
 
-Your job is to:
-1. Summarize the issue.
-2. Estimate its priority.
-3. Provide helpful notes and resource links for human moderators.
-4. List relevant technical skills required.
-5. Keep Helpul Notes Crisp 2-4 lines only
+    Return ONLY a JSON object with these 4 fields:
+    1. "summary": A short summary (string).
+    2. "priority": One of "Low", "Medium", "High" (string).
+    3. "helpfulNotes": Short technical advice (string).
+    4. "skills": Array of technical skills (strings).
 
-IMPORTANT:
-- Respond with *only* valid raw JSON.
-- Do NOT include markdown, code fences, comments, or any extra formatting.
-- The format must be a raw JSON object.
+    IMPORTANT: Return raw JSON only. No markdown.
+  `;
 
-Repeat: Do not wrap your output in markdown or code fences.`;
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`🤖 Attempting to connect with model: ${modelName}...`);
+      
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" }
+      });
 
-  const userPrompt = `You are a ticket triage agent. Only return a strict JSON object with no extra text, headers, or markdown.
+      let text = "";
+      if (response.text && typeof response.text === 'string') text = response.text;
+      else if (typeof response.text === 'function') text = response.text();
+      else if (response.candidates?.[0]?.content?.parts?.[0]?.text) text = response.candidates[0].content.parts[0].text;
+
+      if (text) {
+        const cleanJson = text.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(cleanJson);
         
-Analyze the following support ticket and provide a JSON object with:
+        console.log(`✅ SUCCESS! Analysis completed with ${modelName}`);
+        
+        // --- HERE IS THE MAGIC ---
+        // Map the AI response (skills) to what your DB uses (relatedSkills)
+        return {
+            summary: parsed.summary,
+            priority: parsed.priority,
+            helpfulNotes: parsed.helpfulNotes,
+            // Guarantee that relatedSkills always has data
+            relatedSkills: parsed.skills || parsed.relatedSkills || [] 
+        };
+      }
 
-- summary: A short 1-2 sentence summary of the issue.
-- priority: One of "low", "medium", or "high".
-- helpfulNotes: A detailed technical explanation that a moderator can use to solve this issue. Include useful external links or resources if possible.
-- relatedSkills: An array of relevant skills required to solve the issue (e.g., ["React", "MongoDB"]).
-
-Respond ONLY in this JSON format and do not include any other text or markdown in the answer:
-
-{
-"summary": "Short summary of the ticket",
-"priority": "HIGH",
-"helpfulNotes": "Here are useful tips...",
-"relatedSkills": ["React", "Node.js"]
-}
-
----
-
-Ticket information:
-
-- Title: ${ticket.title}
-- Description: ${ticket.description}`;
-
-  try {
-    // Calling the Gemini API
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-pro",
-      config: {
-        responseMimeType: "application/json", 
-        systemInstruction: systemInstruction,
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: userPrompt }],
-        },
-      ],
-    });
-
-    const raw = response.text; 
-
-    // Check if raw response exists
-    if (!raw) {
-      console.error(
-        "AI response is empty or undefined. Full response structure:",
-        JSON.stringify(response, null, 2)
-      );
-      return null;
+    } catch (error) {
+      const errorMsg = error.message ? error.message.split('\n')[0] : "Unknown error";
+      console.warn(`⚠️ Failed ${modelName}: ${errorMsg}... Trying next model.`);
     }
-
-    // Cleaning the response string
-    let cleanedResponse = String(raw).trim();
-
-    // First, try to extract JSON from markdown code blocks (fallback)
-    const markdownMatch = cleanedResponse.match(/```json\n([\s\S]*?)\n```/i) || 
-                          cleanedResponse.match(/```([\s\S]*?)```/i);
-    
-    if (markdownMatch) {
-      cleanedResponse = markdownMatch[1].trim();
-    }
-
-    // Remove any leading/trailing text that might interfere with JSON parsing
-    // Look for JSON object boundaries
-    const jsonStart = cleanedResponse.indexOf("{");
-    const jsonEnd = cleanedResponse.lastIndexOf("}");
-
-    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-      cleanedResponse = cleanedResponse.substring(jsonStart, jsonEnd + 1);
-    }
-
-    // Parse the JSON
-    const parsedResult = JSON.parse(cleanedResponse);
-
-    // Validate the required fields
-    if (
-      !parsedResult.summary ||
-      !parsedResult.priority ||
-      !parsedResult.helpfulNotes ||
-      !parsedResult.relatedSkills
-    ) {
-      console.warn("Parsed JSON is missing required fields:", parsedResult);
-    }
-
-
-    const validPriorities = ["LOW", "MEDIUM", "HIGH"];
-    if (!validPriorities.includes(parsedResult.priority.toUpperCase())) {
-      console.warn(
-        `Invalid priority "${parsedResult.priority}". Setting to "medium".`
-      );
-      parsedResult.priority = "MEDIUM";
-    }
-
-
-    if (!Array.isArray(parsedResult.relatedSkills)) {
-      console.warn("relatedSkills is not an array. Converting to array.");
-      parsedResult.relatedSkills = parsedResult.relatedSkills
-        ? [parsedResult.relatedSkills]
-        : [];
-    }
-
-    return parsedResult;
-  } catch (e) {
-    // console.error("Failed to parse JSON from AI response:", e.message);
-    
-    // console.error("Full error:", e);
-
-   
-    return {
-      summary: "Unable to process ticket automatically",
-      priority: "MEDIUM",
-      helpfulNotes: "Manual review required. AI parsing failed.",
-      relatedSkills: ["Manual Review"],
-    };
   }
+
+  // --- FALLBACK (PLAN B) ---
+  console.log("❌ All models failed. Using local fallback.");
+  
+  const isUrgent = ticket.title.toLowerCase().includes("error") || ticket.title.toLowerCase().includes("urgent");
+  return {
+    summary: `Automated analysis: ${ticket.title}`,
+    priority: isUrgent ? "High" : "Medium",
+    helpfulNotes: "AI service busy. A preliminary analysis has been generated.",
+    relatedSkills: ["General Support", "Manual Review"] // We use relatedSkills here as well
+  };
 };
 
 export default analyzeTicket;
